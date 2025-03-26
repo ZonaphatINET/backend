@@ -10,8 +10,9 @@ app = Flask(__name__)
 
 # กำหนด CORS
 CORS(app, resources={r"/*": {"origins": [
-    "http://localhost:3000", 
-    "https://zonaphatinet.github.io/INET_Project_end_Frontend/"
+    "https://zonaphatinet.github.io/INET_Project_end_Frontend/",
+    "http://localhost:3000",
+    "http://185.84.161.66:3000"
 ]}}, supports_credentials=True)
 
 # เชื่อมต่อกับ MongoDB
