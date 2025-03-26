@@ -9,7 +9,10 @@ import json
 app = Flask(__name__)
 
 # กำหนด CORS
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": [
+    "http://localhost:3000", 
+    "https://zonaphatinet.github.io/INET_Project_end_Frontend/"
+]}}, supports_credentials=True)
 
 # เชื่อมต่อกับ MongoDB
 client = MongoClient("mongodb+srv://s6506022420011:0949700912INET@users.ttwq4.mongodb.net/")  # ใช้ MongoDB URI ของคุณ
