@@ -13,6 +13,7 @@ CORS(app, resources={r"/*": {"origins": [
     "http://zonaphatinet.github.io/INET_Project_end_Frontend/",
     "http://localhost:3000",
     "http://185.84.161.66:3000"
+    "https://guileless-monstera-4e3760.netlify.app"
 ]}}, supports_credentials=True)
 
 # เชื่อมต่อกับ MongoDB
@@ -832,6 +833,105 @@ def get_all_companies_ratings():
         
         return jsonify(companies_ratings)
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    # ดึงข้อมูลรายละเอียดของนักศึกษา
+@app.route('/student-details/<student_id>', methods=['GET'])
+def get_student_details(student_id):
+    try:
+        # ค้นหาข้อมูลผู้ใช้จากฐานข้อมูล
+        user = users_collection.find_one({"profile.student_id": student_id}, {"_id": 0, "password": 0})
+        
+        if not user:
+            return jsonify({"error": "ไม่พบข้อมูลนักศึกษา"}), 404
+        
+        # ค้นหาข้อมูลการจับคู่
+        match = match_collection.find_one({"macth.student_id": student_id}, {"_id": 0})
+        
+        student_data = user.get("profile", {})
+        
+        # เพิ่มข้อมูลการจับคู่
+        if match:
+            company_id = match["macth"]["company_id"]
+            status = match["macth"]["status"]
+            
+            # ค้นหาข้อมูลบริษัท
+            company = companies_collection.find_one({"company_id": company_id}, {"_id": 0})
+            company_name = company["company"]["company_name"] if company else "ไม่พบข้อมูลบริษัท"
+            
+            student_data["status"] = status
+            student_data["company"] = company_name
+            student_data["company_id"] = company_id
+        else:
+            student_data["status"] = "ไม่มีสถานะ"
+            student_data["company"] = "-"
+        
+        return jsonify(student_data)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ลบข้อมูลนักศึกษา
+@app.route('/delete-student/<student_id>', methods=['DELETE'])
+def delete_student(student_id):
+    try:
+        # ค้นหาข้อมูลการจับคู่ก่อน
+        match = match_collection.find_one({"macth.student_id": student_id})
+        
+        # ลบข้อมูลการจับคู่ (ถ้ามี)
+        if match:
+            company_id = match["macth"]["company_id"]
+            
+            # ลบข้อมูลการจับคู่
+            match_collection.delete_one({"macth.student_id": student_id})
+            
+            # ลดจำนวนนักศึกษาที่ฝึกงานในบริษัทนั้น
+            companies_collection.update_one(
+                {"company_id": company_id},
+                {"$inc": {"student_count": -1}}  # ลดค่า student_count ลง 1
+            )
+        
+        # ลบข้อมูลรีวิวของนักศึกษา (ถ้ามี)
+        review_collection.delete_many({"review.student_id": student_id})
+        
+        # ลบข้อมูลผู้ใช้
+        result = users_collection.delete_one({"profile.student_id": student_id})
+        
+        if result.deleted_count == 0:
+            return jsonify({"error": "ไม่พบข้อมูลนักศึกษา"}), 404
+            
+        return jsonify({"message": "ลบข้อมูลนักศึกษาเรียบร้อยแล้ว"}), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    # Add this endpoint to your app.py file
+
+@app.route('/delete-company/<company_id>', methods=['DELETE'])
+def delete_company(company_id):
+    try:
+        # ตรวจสอบว่ามีการจับคู่กับนักศึกษาอยู่หรือไม่
+        matches = list(match_collection.find({"macth.company_id": company_id}))
+        
+        if matches:
+            # มีนักศึกษาที่เลือกสถานประกอบการนี้อยู่
+            return jsonify({
+                "error": "ไม่สามารถลบสถานประกอบการนี้ได้ เนื่องจากมีนักศึกษาเลือกสถานประกอบการนี้แล้ว",
+                "student_count": len(matches)
+            }), 400
+        
+        # ลบข้อมูลรีวิวที่เกี่ยวข้องกับสถานประกอบการนี้ (ถ้ามี)
+        review_collection.delete_many({"review.company_id": company_id})
+        
+        # ลบข้อมูลสถานประกอบการ
+        result = companies_collection.delete_one({"company_id": company_id})
+        
+        if result.deleted_count == 0:
+            return jsonify({"error": "ไม่พบข้อมูลสถานประกอบการ"}), 404
+            
+        return jsonify({"message": "ลบข้อมูลสถานประกอบการเรียบร้อยแล้ว"}), 200
+        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
