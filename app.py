@@ -13,7 +13,7 @@ CORS(app, resources={r"/*": {"origins": [
     "http://zonaphatinet.github.io/INET_Project_end_Frontend/",
     "http://localhost:3000",
     "http://185.84.161.66:3000"
-    "https://guileless-monstera-4e3760.netlify.app"
+    "https://bright-youtiao-3e2940.netlify.app/"
 ]}}, supports_credentials=True)
 
 # เชื่อมต่อกับ MongoDB
@@ -934,6 +934,159 @@ def delete_company(company_id):
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+    # เพิ่ม import ที่จำเป็น
+import os
+import secrets
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from datetime import datetime, timedelta
+
+# เพิ่มในส่วน MongoDB Collections
+db_reset = client["password_reset"]
+reset_token_collection = db_reset["reset_tokens"]
+
+# ฟังก์ชันขอรีเซ็ตรหัสผ่าน
+@app.route('/request-password-reset', methods=['POST'])
+def request_password_reset():
+    data = request.json
+    email = data.get('email')
+    
+    if not email:
+        return jsonify({"message": "Email is required"}), 400
+    
+    # ค้นหาผู้ใช้จากอีเมล
+    user = users_collection.find_one({"profile.email": email}) or teacher_staff_collection.find_one({"profile.email": email})
+    
+    if not user:
+        return jsonify({"message": "Email not found"}), 404
+    
+    # สร้าง token
+    token = secrets.token_urlsafe(64)
+    expiration = datetime.now() + timedelta(hours=1)  # หมดอายุใน 1 ชั่วโมง
+    
+    # บันทึก token ลงในฐานข้อมูล
+    reset_token_collection.insert_one({
+        "token": token,
+        "username": user["username"],
+        "email": email,
+        "expiration": expiration
+    })
+    
+    # ส่งอีเมล
+    try:
+        send_reset_email(email, token, user["username"])
+        return jsonify({"message": "Password reset email sent"}), 200
+    except Exception as e:
+        print(f"Error sending email: {str(e)}")
+        return jsonify({"message": "Failed to send reset email"}), 500
+
+# ฟังก์ชันส่งอีเมลรีเซ็ตรหัสผ่าน
+def send_reset_email(email, token, username):
+    # แทนที่ด้วย SMTP configuration ของคุณ
+    smtp_server = "smtp.gmail.com"
+    smtp_port = 587
+    smtp_username = os.environ.get("EMAIL_USERNAME", "your-email@gmail.com")
+    smtp_password = os.environ.get("EMAIL_PASSWORD", "your-app-password")
+    
+    # สร้าง URL สำหรับรีเซ็ตรหัสผ่าน
+    reset_url = f"http://localhost:3000/reset-password/{token}"
+    
+    # สร้างเนื้อหาอีเมล
+    subject = "รีเซ็ตรหัสผ่านระบบฝึกงาน"
+    body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto;">
+        <div style="padding: 20px; background-color: #f7f7f7; border-radius: 5px;">
+            <h2 style="color: #0066cc;">คำขอรีเซ็ตรหัสผ่าน</h2>
+            <p>สวัสดี {username},</p>
+            <p>เราได้รับคำขอให้รีเซ็ตรหัสผ่านสำหรับบัญชีของคุณ หากคุณไม่ได้ทำรายการนี้ กรุณาละเลยอีเมลฉบับนี้</p>
+            <p>หากคุณต้องการรีเซ็ตรหัสผ่าน กรุณาคลิกที่ลิงก์ด้านล่าง:</p>
+            <p style="margin: 30px 0; text-align: center;">
+                <a href="{reset_url}" style="background-color: #0066cc; color: white; padding: 12px 20px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">รีเซ็ตรหัสผ่าน</a>
+            </p>
+            <p>ลิงก์นี้จะหมดอายุใน 1 ชั่วโมง</p>
+            <p>หากคุณมีปัญหาในการคลิกที่ปุ่ม กรุณาคัดลอกและวาง URL ด้านล่างนี้ลงในเบราว์เซอร์ของคุณ:</p>
+            <p style="background-color: #e9e9e9; padding: 10px; word-break: break-all;">{reset_url}</p>
+            <p>ขอแสดงความนับถือ,<br>ทีมงานระบบฝึกงาน</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    # สร้างข้อความ
+    msg = MIMEMultipart()
+    msg['From'] = smtp_username
+    msg['To'] = email
+    msg['Subject'] = subject
+    
+    # เพิ่มส่วน HTML
+    msg.attach(MIMEText(body, 'html'))
+    
+    # ส่งอีเมล
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        server.send_message(msg)
+
+# ตรวจสอบความถูกต้องของ token
+@app.route('/validate-reset-token/<token>', methods=['GET'])
+def validate_reset_token(token):
+    # ค้นหา token ในฐานข้อมูล
+    token_data = reset_token_collection.find_one({"token": token})
+    
+    if not token_data:
+        return jsonify({"message": "Invalid token"}), 400
+    
+    # ตรวจสอบว่า token หมดอายุหรือยัง
+    if datetime.now() > token_data["expiration"]:
+        return jsonify({"message": "Token expired"}), 400
+    
+    return jsonify({"message": "Token valid"}), 200
+
+# รีเซ็ตรหัสผ่านด้วย token
+@app.route('/reset-password', methods=['POST'])
+def reset_password():
+    data = request.json
+    token = data.get('token')
+    new_password = data.get('new_password')
+    
+    if not token or not new_password:
+        return jsonify({"message": "Token and new password are required"}), 400
+    
+    # ค้นหา token ในฐานข้อมูล
+    token_data = reset_token_collection.find_one({"token": token})
+    
+    if not token_data:
+        return jsonify({"message": "Invalid token"}), 400
+    
+    # ตรวจสอบว่า token หมดอายุหรือยัง
+    if datetime.now() > token_data["expiration"]:
+        return jsonify({"message": "Token expired"}), 400
+    
+    # ค้นหาผู้ใช้
+    username = token_data["username"]
+    user = users_collection.find_one({"username": username}) or teacher_staff_collection.find_one({"username": username})
+    
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+    
+    # เปลี่ยนรหัสผ่าน
+    hashed_password = generate_password_hash(new_password)
+    
+    # ตรวจสอบว่าเป็นนักเรียนหรืออาจารย์/เจ้าหน้าที่
+    collection_to_update = users_collection if user["role"] == "student" else teacher_staff_collection
+    
+    collection_to_update.update_one(
+        {"username": username},
+        {"$set": {"password": hashed_password}}
+    )
+    
+    # ลบ token หลังจากใช้งาน
+    reset_token_collection.delete_one({"token": token})
+    
+    return jsonify({"message": "Password reset successful"}), 200
     
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
